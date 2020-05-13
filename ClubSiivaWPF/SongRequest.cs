@@ -9,6 +9,8 @@ using System.Linq;
 using System.Net.Http;
 using Newtonsoft.Json.Linq;
 using System.Threading;
+using Discord;
+using ClubSiivaWPF.Databases;
 
 namespace ClubSiivaWPF
 {
@@ -84,7 +86,7 @@ namespace ClubSiivaWPF
         /// <param name="username">The username to impersonate</param>
         /// <param name="roles">The list of roles to check against for mods</param>
         /// <returns>Returns the return message</returns>
-        public static async System.Threading.Tasks.Task<string> RequestSongAsync(SocketMessage message, LiteDatabase hidb, LiteDatabase db, LiteDatabase usrdb, List<string> roles, int priority = 0, string username = null)
+        public static async System.Threading.Tasks.Task<string> RequestSongAsync(Config conf, DiscordSocketClient discordclient, SocketMessage message, LiteDatabase hidb, LiteDatabase db, LiteDatabase usrdb, List<string> roles, int priority = 0, string username = null)
         {
             try
             {
@@ -149,6 +151,26 @@ namespace ClubSiivaWPF
                         {
                             tempuser = username;
                         }
+                        ulong chan = 0;
+                        foreach (var channel in discordclient.GetGuild(Convert.ToUInt64(conf.Guild)).Channels)
+                        {
+                            if (channel.Name.ToLower() == conf.ApprovalChannel.ToLower())
+                            {
+                                chan = channel.Id;
+                                break;
+                            }
+                        }
+                        var toEmebed = new EmbedBuilder();
+                        toEmebed.WithTitle("Song Request");
+                        toEmebed.WithColor(Color.Red);
+                        string description = await GetDescriptionAsync(video.Title);
+                        string longembed = "Requested by: " + tempuser + "\nSong Title: " + video.Title + "\nhttps://www.youtube.com/watch?v=" + id + "\n" + description;
+                        toEmebed.WithDescription(longembed.Truncate(1950));
+
+                        var messageid = await discordclient.GetGuild(Convert.ToUInt64(conf.Guild)).GetTextChannel(chan).SendMessageAsync("", false, toEmebed.Build());
+                        _ = messageid.AddReactionsAsync(new[] { new Emoji("👍"), new Emoji("👎") });
+
+
                         // Generate the template data for the song to add
                         var newsong = new Song
                         {
@@ -159,8 +181,9 @@ namespace ClubSiivaWPF
                             File = tempfile,
                             YoutubeId = id,
                             Priority = priority,
-                            Description = await GetDescriptionAsync(video.Title),
-                            Approved = approved
+                            Description = description,
+                            Approved = approved,
+                            ApprovalMessage = messageid.Id
                         };
                         // Insert the song into the database
                         queuedb.Insert(newsong);

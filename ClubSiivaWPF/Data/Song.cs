@@ -45,5 +45,6 @@
         /// If the song is mod approved or not
         /// </summary>
         public bool Approved { get; set; }
+        public ulong ApprovalMessage { get; set; }
     }
 }

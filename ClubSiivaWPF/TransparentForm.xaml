@@ -1,0 +1,18 @@
+﻿<Window x:Class="ClubSiivaWPF.TransparentForm"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ClubSiivaWPF"
+        mc:Ignorable="d"
+        Title="TransparentForm" Height="37.554" Width="57.439"  AllowsTransparency="True" WindowStyle="None" Background="Transparent">
+    <Grid>
+        <Viewbox>
+            <Label Content="" FontSize="14" MouseDown="MouseDown_Event" Name="Label" Foreground="White">
+                <Label.Effect>
+                    <DropShadowEffect ShadowDepth="0" Color="#FF000000" BlurRadius="1"/>
+                </Label.Effect>
+            </Label>
+        </Viewbox>
+    </Grid>
+</Window>

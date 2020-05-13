@@ -1,4 +1,5 @@
 ﻿using ClubSiivaWPF.Data;
+using ClubSiivaWPF.Databases;
 using Discord;
 using Discord.WebSocket;
 using LiteDB;
@@ -6,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using YoutubeExplode;
 
@@ -22,7 +24,7 @@ namespace ClubSiivaWPF
         /// <param name="usrdb">The liteDB for the users</param>
         /// <param name="roles">The list of roles from the config</param>
         /// <returns></returns>
-        public static async System.Threading.Tasks.Task CommandsAsync(SocketMessage message, LiteDatabase hidb, LiteDatabase db, LiteDatabase usrdb, List<string> roles)
+        public static async System.Threading.Tasks.Task CommandsAsync(DiscordSocketClient discordclient, SocketMessage message, LiteDatabase hidb, LiteDatabase db, LiteDatabase usrdb,LiteDatabase favdb, List<string> roles, Config conf)
         {
             // Get the first word in the message content
             string command = message.Content.ToLower().Split().ToList()[0];
@@ -41,12 +43,12 @@ namespace ClubSiivaWPF
                         if (message.Content.Split().ToList().Count == 3)
                         {
                             // Request the song with the users name
-                            returnmessage = await SongRequest.RequestSongAsync(message, hidb, db, usrdb, roles, 0, message.Content.Split().ToList()[2]);
+                            returnmessage = await SongRequest.RequestSongAsync(conf, discordclient, message, hidb, db, usrdb, roles, 0, message.Content.Split().ToList()[2]);
                         }
                         // Else just request it for the mod themselves
                         else
                         {
-                            returnmessage = await SongRequest.RequestSongAsync(message, hidb, db, usrdb, roles, 0);
+                            returnmessage = await SongRequest.RequestSongAsync(conf, discordclient, message, hidb, db, usrdb, roles, 1);
                         }
                         // If the return message is not empty give them the response it kicked back
                         if (returnmessage != string.Empty)
@@ -64,12 +66,12 @@ namespace ClubSiivaWPF
                             if (DataFunctions.AlreadyRequested(message.Author, db) == true)
                             {
                                 // Priority 2 means they've already requested so throw it to the back
-                                returnmessage = await SongRequest.RequestSongAsync(message, hidb, db, usrdb, roles, 2);
+                                returnmessage = await SongRequest.RequestSongAsync(conf, discordclient, message, hidb, db, usrdb, roles, 2);
                             }
                             else
                             {
                                 // Prirotiy 1 means they haven't requested anything yet
-                                returnmessage = await SongRequest.RequestSongAsync(message, hidb, db, usrdb, roles, 1);
+                                returnmessage = await SongRequest.RequestSongAsync(conf, discordclient, message, hidb, db, usrdb, roles, 1);
                             }
                             // Kick them back the message we got
                             DiscordFunctions.EmbedThis(message, null, message.Author.Mention + " " + returnmessage, "green");
@@ -311,6 +313,43 @@ namespace ClubSiivaWPF
                     }
 
                 }
+                else if (DataFunctions.IsMod(message, roles) == true && message.Content.ToLower().Split().ToList().Count == 3)
+                {
+                    // Get the song ID and check if its in the queue
+                    var id = YoutubeClient.ParseVideoId(message.Content.Split().ToList()[1]);
+                    var queuedb = db.GetCollection<Song>("Queue");
+                    var results = queuedb.Find(x => x.YoutubeId == id);
+                    // If we found the song set the priority to the highest we can
+                    if (results.ToList().Count > 0)
+                    {
+                        string pritext = message.Content.Split().ToList()[2];
+                        var pri = 0;
+                        if (pritext.ToLower() == "high" || pritext.ToLower() == "highest" || pritext.ToLower() == "0")
+                        {
+                            pri = 0;
+                        }
+                        else if (pritext.ToLower() == "medium" || pritext.ToLower() == "med" || pritext.ToLower() == "1")
+                        {
+                            pri = 1;
+                        }
+                        else if (pritext.ToLower() == "lower" || pritext.ToLower() == "lowest" || pritext.ToLower() == "low" || pritext.ToLower() == "2")
+                        {
+                            pri = 2;
+                        }
+                        Song firstsong = results.First();
+                        firstsong.Priority = pri;
+                        queuedb.Update(firstsong);
+                        DiscordFunctions.EmbedThis(message, null, "Song has been made high ranking", "Green");
+                        return;
+                    }
+                    // Else just tell them we didnt find it 
+                    else
+                    {
+                        DiscordFunctions.EmbedThis(message, null, "Song not found", "yellow");
+                        return;
+                    }
+
+                }
                 // Warn the mod they didnt supply a full command
                 else if (DataFunctions.IsMod(message, roles) == true && message.Content.ToLower().Split().ToList().Count != 2)
                 {
@@ -495,6 +534,49 @@ namespace ClubSiivaWPF
                     return;
                 }
             }
+            else if (command == "!favorites")
+            {
+                var favoritedb = favdb.GetCollection<Favorites>("Favorites");
+                var results = favoritedb.FindAll();
+                string mess = "";
+                List<string> playlistset = new List<string>();
+                int counter = 0;
+                foreach (var song in results)
+                {
+                    if (counter < 50)
+                    {
+                        // Add it to the string list
+                        mess = mess + YoutubeClient.ParseVideoId(song.YoutubeId) + ",";
+                        counter++;
+                    }
+                    else
+                    {
+                        playlistset.Add(mess);
+                        mess = "";
+                        counter = 0;
+                    }
+                }
+                if (mess != "")
+                {
+                    playlistset.Add(mess);
+                }
+                // Write the data to a file and upload it to discord
+                if (playlistset.Count > 0)
+                {
+                    string fullplaylist = "";
+                    foreach (string playlist in playlistset)
+                    {
+                        WebRequest request = WebRequest.Create("https://www.youtube.com/watch_videos?video_ids=" + playlist);
+                        WebResponse response = request.GetResponse();
+                        fullplaylist = fullplaylist + response.ResponseUri + "\n------------------------------------------------------------------------------------------\n";
+                    }
+                    DiscordFunctions.EmbedThis(message, "Favorites Playlist", fullplaylist, "green");
+                }
+                else
+                {
+                    DiscordFunctions.EmbedThis(message, null, "No songs have been favorited", "green");
+                }
+            }
             // Check if the command is history
             else if (command == "!history")
             {
@@ -505,21 +587,42 @@ namespace ClubSiivaWPF
                     var hisdb = hidb.GetCollection<History>("History");
                     var results = hisdb.FindAll();
                     string mess = "";
+                    List<string> playlistset = new List<string>();
+                    int counter = 0;
                     // Check if the song has been played and if its not a bad song
                     foreach (var song in results)
                     {
                         if (song.Played == true && song.BadSong == false)
                         {
-                            // Add it to the string list
-                            mess = mess + " https://www.youtube.com/watch?v=" + song.YoutubeId + "\n";
+                            if (counter < 50)
+                            {
+                                // Add it to the string list
+                                mess = mess + song.YoutubeId + ",";
+                                counter++;
+                            }
+                            else
+                            {
+                                playlistset.Add(mess);
+                                mess = "";
+                                counter = 0;
+                            }
                         }
                     }
-                    // Write the data to a file and upload it to discord
-                    if (mess != string.Empty)
+                    if (mess != "")
                     {
-                        System.IO.File.WriteAllText("./History.csv", mess);
-                        await message.Channel.SendFileAsync("./History.csv", "Song history");
-                        System.IO.File.Delete("./History.csv");
+                        playlistset.Add(mess);
+                    }
+                    // Write the data to a file and upload it to discord
+                    if (playlistset.Count > 0)
+                    {
+                        string fullplaylist = "";
+                        foreach (string playlist in playlistset)
+                        {
+                            WebRequest request = WebRequest.Create("https://www.youtube.com/watch_videos?video_ids=" + playlist);
+                            WebResponse response = request.GetResponse();
+                            fullplaylist = fullplaylist + response.ResponseUri + "\n------------------------------------------------------------------------------------------\n";
+                        }
+                        DiscordFunctions.EmbedThis(message, "History Playlist", fullplaylist, "green");
                     }
                     // Tell them nothing has been played
                     else
@@ -556,6 +659,7 @@ namespace ClubSiivaWPF
                 generalHelp.AddField("Help", "Shows this command");
                 generalHelp.AddField("Songrequest <video> <user>", "Requests a youtube song to the queue (If you are a mod you can supply user to submit it as a user)");
                 generalHelp.AddField("Remove <video>", "Removes the song requested, if no video is specified removes first song from user");
+                generalHelp.AddField("Favorites", "Prints out Pie's favorites as a playlist");
                 generalHelp.AddField("BanSong <video>", "Mod: Allows mods to ban a song from being played");
                 generalHelp.AddField("Queue", "Mod: Prints the order of songs in text");
                 generalHelp.AddField("Unapproved", "Mod: Prints the list of songs unapproved");

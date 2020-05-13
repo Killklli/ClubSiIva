@@ -1,4 +1,8 @@
 ﻿using ClubSiivaWPF.Data;
+using ClubSiivaWPF.Databases;
+using Discord;
+using Discord.Commands;
+using Discord.WebSocket;
 using LiteDB;
 using System;
 using System.Collections.Generic;
@@ -21,7 +25,7 @@ namespace ClubSiivaWPF
         /// <param name="form">The main form running</param>
         /// <param name="hidb">The history DB</param>
         /// <param name="db">The queue DB</param>
-        public static async void ManualRequest(string url, MainWindow form, LiteDatabase hidb, LiteDatabase db)
+        public static async void ManualRequest(string url, MainWindow form, LiteDatabase hidb, LiteDatabase db, DiscordSocketClient discordclient, Config conf)
         {
             // Parse the ID
             var id = YoutubeClient.ParseVideoId(url);
@@ -55,7 +59,7 @@ namespace ClubSiivaWPF
                     Approved = true,
                     Id = 999999999
                 };
-                _ = TriggerqueueAsync(temp, form, hidb, db);
+                _ = TriggerqueueAsync(temp, form, hidb, db, discordclient, conf);
             }
         }
         /// <summary>
@@ -65,19 +69,21 @@ namespace ClubSiivaWPF
         /// <param name="form">The main form thread</param>
         /// <param name="hidb">The history DB</param>
         /// <param name="db">The queue DB</param>
-        public static async Task TriggerqueueAsync(Song songdata, MainWindow form, LiteDatabase hidb, LiteDatabase db)
+        public static async Task TriggerqueueAsync(Song songdata, MainWindow form, LiteDatabase hidb, LiteDatabase db, DiscordSocketClient client, Config conf)
         {
             // Check if we have already downloaded the file to play
             var song = songdata;
             if (!File.Exists(song.File))
             {
                 // Download the video if we havent already
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                startInfo.CreateNoWindow = true;
-                startInfo.UseShellExecute = false;
-                startInfo.FileName = "youtube-dl.exe";
-                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                startInfo.Arguments = "-f mp4 https://www.youtube.com/watch?v=" + song.YoutubeId + " -o " + "\"" + song.File + "\"";
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    FileName = "youtube-dl.exe",
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    Arguments = "-f mp4 https://www.youtube.com/watch?v=" + song.YoutubeId + " -o " + "\"" + song.File + "\""
+                };
 
                 try
                 {
@@ -112,6 +118,36 @@ namespace ClubSiivaWPF
             await form.SongTitle.Dispatcher.BeginInvoke((Action)(() => form.SongTitle.Content = song.Title));
             System.IO.File.WriteAllText(Directory.GetCurrentDirectory() + "/textfiles/Title.txt", song.Title);
             await form.ProgressSlider.Dispatcher.BeginInvoke((Action)(() => form.ProgressSlider.Maximum = TimeSpan.Parse(song.Duration).TotalSeconds));
+            await form.Favorite.Dispatcher.BeginInvoke((Action)(() => form.Favorite.Content = "☆"));
+            await form.CurrentURL.Dispatcher.BeginInvoke((Action)(() => form.CurrentURL.Text = "https://www.youtube.com/watch?v=" + song.YoutubeId));
+            // Find the discord channel to tell were now playing
+            ulong chan = 0;
+            foreach(var channel in client.GetGuild(Convert.ToUInt64(conf.Guild)).Channels)
+            {
+                if(channel.Name.ToLower() == conf.MessageChannel.ToLower())
+                {
+                    chan = channel.Id;
+                    break;
+                }
+            }
+            // Build the embedded message
+            var toEmebed = new EmbedBuilder();
+            toEmebed.WithTitle("Now Playing");
+            toEmebed.WithColor(Color.Green);
+            var username = "";
+            try
+            {
+                username = client.GetGuild(Convert.ToUInt64(Convert.ToUInt64(conf.Guild))).GetUser(song.RequesterId).Mention;
+            }
+            catch
+            {
+                username = "Manual Request/Invalid Name";
+            }
+            // Send the data with description
+            toEmebed.WithDescription("Requested by: " + username + "\nSong Title: " + song.Title + "\nhttps://www.youtube.com/watch?v=" + song.YoutubeId);
+            var messageid = await client.GetGuild(Convert.ToUInt64(conf.Guild)).GetTextChannel(chan).SendMessageAsync("", false, toEmebed.Build());
+            _ = messageid.AddReactionsAsync(new[] { new Emoji("👍"), new Emoji("👎") });
+
             // Make sure this is not a manual request
             if (song.Id != 999999999)
             {
@@ -128,6 +164,7 @@ namespace ClubSiivaWPF
             // Remove it from the queue
             var queuedb = db.GetCollection<Song>("Queue");
             queuedb.Delete(song.Id);
+
         }
         /// <summary>
         /// Triggered when we need to find the oncoming queue
@@ -135,7 +172,7 @@ namespace ClubSiivaWPF
         /// <param name="form">The main form</param>
         /// <param name="hidb">The history Database</param>
         /// <param name="db">The queue Database</param>
-        public static void Queueevent(MainWindow form, LiteDatabase hidb, LiteDatabase db)
+        public static void Queueevent(MainWindow form, LiteDatabase hidb, LiteDatabase db, DiscordSocketClient discordclient, Config conf)
         {
             // Find the list of queue songs
             Song temp = new Song();
@@ -159,7 +196,7 @@ namespace ClubSiivaWPF
             // Play the song
             if (temp.Title != null)
             {
-                Task.Run(() => TriggerqueueAsync(temp, form, hidb, db));
+                Task.Run(() => TriggerqueueAsync(temp, form, hidb, db,discordclient, conf));
             }
         }
         /// <summary>
@@ -240,7 +277,7 @@ namespace ClubSiivaWPF
         /// <param name="form">The main form</param>
         /// <param name="hidb">The history database</param>
         /// <param name="db">The queue database</param>
-        public static async void Playprevious(MainWindow form, LiteDatabase hidb, LiteDatabase db)
+        public static async void Playprevious(MainWindow form, LiteDatabase hidb, LiteDatabase db, DiscordSocketClient discordclient, Config conf)
         {
             // Search for all songs in the hisotry
             var historydb = hidb.GetCollection<History>("History");
@@ -275,7 +312,7 @@ namespace ClubSiivaWPF
                     Approved = true,
                     Id = 999999999
                 };
-                _ = TriggerqueueAsync(temp, form, hidb, db);
+                _ = TriggerqueueAsync(temp, form, hidb, db, discordclient, conf);
             }
         }
         /// <summary>

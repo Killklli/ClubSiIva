@@ -1,5 +1,11 @@
 ﻿using ClubSiivaWPF.Data;
+using ClubSiivaWPF.Databases;
+using Discord;
+using Discord.Commands;
+using Discord.WebSocket;
 using LiteDB;
+using Microsoft.Extensions.DependencyInjection;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -22,11 +28,18 @@ namespace ClubSiivaWPF
     public partial class MainWindow : Window
     {
         /// Block of holders for databases and data types
-        private readonly LiteDatabase db = new LiteDatabase(@"Queue.db");
-        private readonly LiteDatabase hidb = new LiteDatabase(@"History.db");
-        private readonly LiteDatabase usrdb = new LiteDatabase(@"Users.db");
+        private static readonly LiteDatabase db = new LiteDatabase(@"Queue.db");
+        private static readonly LiteDatabase hidb = new LiteDatabase(@"History.db");
+        private static readonly LiteDatabase usrdb = new LiteDatabase(@"Users.db");
+        private static readonly LiteDatabase favdb = new LiteDatabase(@"Favorites.db");
         private List<Song> AllQueue = new List<Song>();
         public string videofile = "";
+        private static DiscordSocketClient discordclient;
+        private static IServiceProvider _services;
+        private static Config conf;
+        // Discord Client for actual connection
+
+        public static List<String> ModRoles = new List<string>();
 
         /// <summary>
         /// Main entry for the application
@@ -36,13 +49,34 @@ namespace ClubSiivaWPF
             InitializeComponent();
             // Create the temp directories
             FileFunctions.MakeTempDir();
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                FileName = "youtube-dl.exe",
+                WindowStyle = ProcessWindowStyle.Hidden,
+                Arguments = "--rm-cache-dir"
+            };
+
+            try
+            {
+                // Start the process with the info we specified.
+                // Call WaitForExit and then the using statement will close.
+                using (Process exeProcess = Process.Start(startInfo))
+                {
+                    exeProcess.WaitForExit();
+                }
+            }
+            catch
+            {
+            }
             // Write the tex tfiles
             System.IO.File.WriteAllText(Directory.GetCurrentDirectory() + "/textfiles/Requestor.txt", "");
             System.IO.File.WriteAllText(Directory.GetCurrentDirectory() + "/textfiles/Description.txt", "");
             System.IO.File.WriteAllText(Directory.GetCurrentDirectory() + "/textfiles/Duration.txt", "");
             System.IO.File.WriteAllText(Directory.GetCurrentDirectory() + "/textfiles/Title.txt", "");
             // Start up discord
-            Task.Run(() => DiscordFunctions.StartDiscord(db, hidb, usrdb));
+            Task.Run(() => StartDiscord(db, hidb, usrdb, favdb));
             // Set up a timer for watching data
             System.Windows.Threading.DispatcherTimer dispatcherTimer = new System.Windows.Threading.DispatcherTimer();
             dispatcherTimer.Tick += DispatcherTimer_Tick;
@@ -61,7 +95,10 @@ namespace ClubSiivaWPF
                 "u9P30IvtATM",
                 "6LCWp5TkCZA",
                 "CuUgxl2KV1k",
-                "6LCWp5TkCZA"
+                "6LCWp5TkCZA",
+                "u9g5XsoE4-s",
+                "SCK15CPpL2k",
+                "SJ158CpsrXo"
             };
             // Add them to the history DB as banned
             var historydb = hidb.GetCollection<History>("History");
@@ -81,6 +118,143 @@ namespace ClubSiivaWPF
             }
 
         }
+        public static async Task StartDiscord(LiteDatabase queue, LiteDatabase history, LiteDatabase users, LiteDatabase fav)
+        {
+            var config = new DiscordSocketConfig { MessageCacheSize = 100 };
+            _services = DiscordFunctions.ConfigureServices();
+            discordclient = _services.GetRequiredService<DiscordSocketClient>();
+            discordclient = new DiscordSocketClient(config);
+            discordclient.Log += DiscordFunctions.LogAsync;
+            discordclient.Ready += Ready;
+            discordclient.MessageReceived += MessageReceivedAsync;
+            discordclient.ReactionAdded += ReactionAddedAsync;
+            discordclient.ReactionRemoved += ReactionRemovedAsync;
+            // read file into a string and deserialize JSON to a type
+            conf = JsonConvert.DeserializeObject<Config>(File.ReadAllText(@"discord.cfg"));
+            // Tokens should be considered secret data, and never hard-coded.
+            if (conf.DiscordToken == "TokenString")
+            {
+                MessageBox.Show("Please set your config file discord.cfg to have your bot token" + Environment.NewLine + "---------------------------Instructions---------------------------" + Environment.NewLine + "The required files and links will open after this box closes" + Environment.NewLine + "Add a new application, and under that application add a new bot and get it's token, put that token in the config file" + Environment.NewLine + "And then add the bot to your discord using the client ID from the application" + Environment.NewLine + "https://discordapp.com/oauth2/authorize?&client_id=CLIENTID&scope=bot&permissions=8", "Please configure discord");
+                Process process = new Process();
+                process.StartInfo.FileName = Directory.GetCurrentDirectory() + "/discord.cfg";
+                process.Start();
+                System.Diagnostics.Process.Start("https://discordapp.com/developers/applications/");
+                System.Environment.Exit(0);
+            }
+            ModRoles = conf.ModRoles;
+            await discordclient.LoginAsync(TokenType.Bot, conf.DiscordToken);
+            await discordclient.StartAsync();
+            await discordclient.SetGameAsync("ClubSiiva", null, ActivityType.Listening);
+            // Block the program until it is closed.
+            await Task.Delay(-1);
+        }
+        public static Task Ready()
+        {
+            Debug.WriteLine(discordclient.CurrentUser + " is connected!");
+            return Task.CompletedTask;
+        }
+        public static async Task ReactionAddedAsync(Cacheable<IUserMessage, ulong> message, ISocketMessageChannel channel, SocketReaction reaction)
+        {
+            if (reaction.UserId == discordclient.CurrentUser.Id)
+                return;
+            try
+            {
+                if (channel.Name.ToLower() == conf.ApprovalChannel.ToLower())
+                {
+                    var qdb = db.GetCollection<Song>("Queue");
+                    var resultsq = qdb.Find(x => x.ApprovalMessage == reaction.MessageId);
+                    if (resultsq.Count() > 0)
+                    {
+                        if (reaction.Emote.Name == "👍")
+                        {
+                            foreach (var item in resultsq)
+                            {
+                                item.Approved = true;
+                                qdb.Update(item);
+                            }
+                        }
+                        else if (reaction.Emote.Name == "👎")
+                        {
+                            foreach (var item in resultsq)
+                            {
+                                item.Approved = false;
+                                qdb.Update(item);
+                                // Remove the song by the ID
+                                var song = DataFunctions.RemoveSongBySongId(item.YoutubeId, db);
+                                if (song != string.Empty)
+                                {
+                                    var toEmebed = new EmbedBuilder();
+                                    toEmebed.WithTitle("Song Removed: ");
+                                    toEmebed.WithDescription(item.Title);
+                                    toEmebed.WithColor(Color.Red);
+                                    await channel.SendMessageAsync("", false, toEmebed.Build());
+                                    return;
+                                }
+                                else
+                                {
+                                    var toEmebed = new EmbedBuilder();
+                                    toEmebed.WithTitle("No song to remove");
+                                    toEmebed.WithDescription(item.Title);
+                                    toEmebed.WithColor(Color.Orange);
+                                    await channel.SendMessageAsync("", false, toEmebed.Build());
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+        public static async Task ReactionRemovedAsync(Cacheable<IUserMessage, ulong> message, ISocketMessageChannel channel, SocketReaction reaction)
+        {
+            if (reaction.UserId == discordclient.CurrentUser.Id)
+                return;
+            try
+            {
+                if (channel.Name.ToLower() == conf.ApprovalChannel.ToLower())
+                {
+                    var qdb = db.GetCollection<Song>("Queue");
+                    var resultsq = qdb.Find(x => x.ApprovalMessage == reaction.MessageId);
+                    if (resultsq.Count() > 0)
+                    {
+                        if (reaction.Emote.Name == "👍")
+                        {
+                            foreach (var item in resultsq)
+                            {
+                                item.Approved = false;
+                                qdb.Update(item);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+        public static async Task MessageReceivedAsync(SocketMessage message)
+        {
+            // The bot should never respond to itself.
+            if (message.Author.Id == discordclient.CurrentUser.Id)
+                return;
+            try
+            {
+                if (message.Content != string.Empty)
+                {
+                    if (message.Content[0] == '!')
+                    {
+                        _ = Task.Run(() => Commands.CommandsAsync(discordclient, message, hidb, db, usrdb, favdb, ModRoles, conf));
+                    }
+                }
+            }
+            catch
+            {
+                try
+                {
+                    _ = message.Channel.SendMessageAsync("Something went wrong please try again");
+                }
+                catch { }
+            }
+        }
         /// <summary>
         /// Event for when the app has been closed
         /// </summary>
@@ -93,6 +267,7 @@ namespace ClubSiivaWPF
             {
                 Directory.Delete(Directory.GetCurrentDirectory() + "/temp/", true);
             }
+            Environment.Exit(0);
         }
 
         /// <summary>
@@ -102,18 +277,116 @@ namespace ClubSiivaWPF
         /// <param name="e"></param>
         private async void DispatcherTimer_Tick(object sender, EventArgs e)
         {
-            // Update the progress textbox
-            if (Util.GetMediaState(this.MediaPlayer) == MediaState.Play)
+            try
             {
-                await this.Progress.Dispatcher.BeginInvoke((Action)(() => Progress.Content = this.MediaPlayer.Position.Hours.ToString("D2") + ":" + this.MediaPlayer.Position.Minutes.ToString("D2") + ":" + this.MediaPlayer.Position.Seconds.ToString("D2")));
+                // Update the progress textbox
+                if (Util.GetMediaState(this.MediaPlayer) == MediaState.Play)
+                {
+                    await this.Progress.Dispatcher.BeginInvoke((Action)(() => Progress.Content = this.MediaPlayer.Position.Hours.ToString("D2") + ":" + this.MediaPlayer.Position.Minutes.ToString("D2") + ":" + this.MediaPlayer.Position.Seconds.ToString("D2")));
+                }
             }
-            // Update the queue list
-            _ = Task.Run(() => SongFunctions.UpdateQueueList(db, AllQueue, this));
-            // Pre download the videos
-            _ = Task.Run(() => SongFunctions.PreloadVideos(db));
-            // Keep the slider in sync
-            _ = Task.Run(() => Sliderticktock());
+            catch { }
+            try
+            {
+                // Update the queue list
+                _ = Task.Run(() => SongFunctions.UpdateQueueList(db, AllQueue, this));
+            }
+            catch { }
+            try
+            {
+                // Pre download the videos
+                _ = Task.Run(() => SongFunctions.PreloadVideos(db));
+            }
+            catch { }
+            try
+            {
+                // Keep the slider in sync
+                _ = Task.Run(() => Sliderticktock());
+            }
+            catch { }
+            try
+            {
+                _ = Task.Run(() => TotalDurationUpdate());
+            }
+            catch { }
+            try
+            {
+                _ = Task.Run(() => UpdateFavIconAsync());
+            }
+            catch { }
+        }
 
+        private async Task UpdateFavIconAsync()
+        {
+            try
+            {
+                var text = this.CurrentURL.Dispatcher.Invoke(new Func<string>(() => CurrentURL.Text));
+                if (text != "")
+                {
+                    var favoritedb = favdb.GetCollection<Favorites>("Favorites");
+                    var resultsq = favoritedb.Find(x => x.YoutubeId.Contains(text));
+                    if (resultsq.Count() == 0)
+                    {
+                        await this.Favorite.Dispatcher.BeginInvoke((Action)(() => Favorite.Content = "☆"));
+                    }
+                    else
+                    {
+                        await this.Favorite.Dispatcher.BeginInvoke((Action)(() => Favorite.Content = "★"));
+                    }
+                }
+            }
+            catch { }
+        }
+        private void UpdateFavorite(bool fav)
+        {
+            try
+            {
+                if (this.CurrentURL.Text != "")
+                {
+                    var favoritedb = favdb.GetCollection<Favorites>("Favorites");
+                    var resultsq = favoritedb.Find(x => x.YoutubeId.Contains(this.CurrentURL.Text));
+                    if (fav == false)
+                    {
+                        foreach (var song in resultsq)
+                        {
+                            favoritedb.Delete(song.Id);
+                        }
+                    }
+                    else
+                    {
+                        foreach (var song in resultsq)
+                        {
+                            return;
+                        }
+                        Favorites item = new Favorites
+                        {
+                            YoutubeId = this.CurrentURL.Text
+                        };
+                        favoritedb.Upsert(item);
+                    }
+                }
+            }
+            catch { }
+        }
+   
+        /// <summary>
+        /// Function to update the total time textbox
+        /// </summary>
+        private async void TotalDurationUpdate()
+        {
+            try
+            {
+                var queuedb = db.GetCollection<Song>("Queue");
+                var results = queuedb.Find(x => x.Approved == true);
+                TimeSpan addedduration = new TimeSpan();
+                foreach (var song in results)
+                {
+                    var temp = TimeSpan.Parse(song.Duration);
+                    addedduration += temp;
+                }
+                await this.TotalDuration.Dispatcher.BeginInvoke((Action)(() => TotalDuration.Content = addedduration.ToString()));
+            }
+            catch { }
         }
         /// <summary>
         /// Event for watching when videos finish
@@ -148,7 +421,7 @@ namespace ClubSiivaWPF
             }
             catch { }
             // Queue the next song and hit play
-            SongFunctions.Queueevent(this, hidb, db);
+            SongFunctions.Queueevent(this, hidb, db, discordclient, conf);
             this.MediaPlayer.Play();
         }
         /// <summary>
@@ -203,7 +476,7 @@ namespace ClubSiivaWPF
         /// <param name="e"></param>
         private void PlayPrevious_Click(object sender, RoutedEventArgs e)
         {
-            Task.Run(() => SongFunctions.Playprevious(this, hidb, db));
+            Task.Run(() => SongFunctions.Playprevious(this, hidb, db, discordclient,conf));
         }
         /// <summary>
         /// Button to replay the song
@@ -222,7 +495,7 @@ namespace ClubSiivaWPF
         /// <param name="e"></param>
         private void PlayNext_Click(object sender, RoutedEventArgs e)
         {
-            SongFunctions.Queueevent(this, hidb, db);
+            SongFunctions.Queueevent(this, hidb, db, discordclient, conf);
         }
         /// <summary>
         /// Function to manually add a song to play
@@ -235,7 +508,7 @@ namespace ClubSiivaWPF
             {
                 // Get the text from the textbox and request it
                 var url = this.video.Text;
-                Task.Run(() => SongFunctions.ManualRequest(url, this, hidb, db));
+                Task.Run(() => SongFunctions.ManualRequest(url, this, hidb, db, discordclient, conf));
             }
             catch { }
         }
@@ -302,7 +575,7 @@ namespace ClubSiivaWPF
             {
                 // Trigger the queue to play the next song
                 Song item = this.SongList.SelectedItem as Song;
-                Task.Run(() => SongFunctions.TriggerqueueAsync(item, this, hidb, db));
+                Task.Run(() => SongFunctions.TriggerqueueAsync(item, this, hidb, db, discordclient, conf));
                 try
                 {
                     // Trigger the queue to be updated in the UI
@@ -361,6 +634,55 @@ namespace ClubSiivaWPF
                 MediaPlayer.Position = new TimeSpan(0, 0, 0, pos, 0);
             }
             catch { }
+        }
+
+        private void Popout_Duration_Click(object sender, RoutedEventArgs e)
+        {
+            TransparentForm win2 = new TransparentForm();
+            win2.originallabel = this.SongDuration;
+            win2.Show();
+
+        }
+
+        private void Popout_Total_Duration_Click(object sender, RoutedEventArgs e)
+        {
+            TransparentForm win2 = new TransparentForm();
+            win2.originallabel = this.TotalDuration;
+            win2.Show();
+        }
+
+        private void Progress_Click(object sender, RoutedEventArgs e)
+        {
+            TransparentForm win2 = new TransparentForm();
+            win2.originallabel = this.Progress;
+            win2.Show();
+        }
+
+        private void Requestor_Click(object sender, RoutedEventArgs e)
+        {
+            TransparentForm win2 = new TransparentForm();
+            win2.originallabel = this.SongRequestor;
+            win2.Show();
+        }
+
+        private void Title_Click(object sender, RoutedEventArgs e)
+        {
+            TransparentForm win2 = new TransparentForm();
+            win2.originallabel = this.SongTitle;
+            win2.Show();
+        }
+        private void Favorite_Click(object sender, RoutedEventArgs e)
+        {
+            if(Favorite.Content.ToString() == "☆")
+            {
+                Favorite.Content = "★";
+                UpdateFavorite(true);
+            }
+            else
+            {
+                Favorite.Content = "☆";
+                UpdateFavorite(false);
+            }
         }
     }
     public static class Util
