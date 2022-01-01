@@ -91,11 +91,11 @@ namespace ClubSiivaWPF
             try
             {
                 // Try to parse the string
-                var id = YoutubeClient.ParseVideoId(message.Content.Split().ToList()[1]);
+                var id = message.Content.Split().ToList()[1];
                 var client = new YoutubeClient();
                 bool approved = false;
                 // Check if the user is a mod, if they are automatically approve the video
-                if(DataFunctions.IsMod(message, roles))
+                if (DataFunctions.IsMod(message, roles))
                 {
                     approved = true;
                 }
@@ -125,12 +125,12 @@ namespace ClubSiivaWPF
                     return "Song has already been requested";
                 }
                 // Get the video data from youtube
-                YoutubeExplode.Models.Video video = null;
+                YoutubeExplode.Videos.Video video = null;
                 for (int attempts = 0; attempts < 3; attempts++)
                 {
                     try
                     {
-                        video = await client.GetVideoAsync(id);
+                        video = await client.Videos.GetAsync(id);
                         await GetDescriptionAsync(video.Title);
                         break;
                     }
@@ -141,7 +141,7 @@ namespace ClubSiivaWPF
                 if (video != null)
                 {
                     // Make sure the song is from Siivagunner
-                    if (video.Author.ToLower() == "siivagunner")
+                    if (video.Author.Title.ToLower() == "siivagunner")
                     {
                         // Create a temp file to store the song in
                         string tempfile = FileFunctions.CreateTmpFile();

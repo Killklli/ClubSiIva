@@ -28,15 +28,14 @@ namespace ClubSiivaWPF
         public static async void ManualRequest(string url, MainWindow form, LiteDatabase hidb, LiteDatabase db, DiscordSocketClient discordclient, Config conf)
         {
             // Parse the ID
-            var id = YoutubeClient.ParseVideoId(url);
             var client = new YoutubeClient();
-            YoutubeExplode.Models.Video video = null;
+            YoutubeExplode.Videos.Video video = null;
             // Attempt to get the video information
             for (int attempts = 0; attempts < 3; attempts++)
             {
                 try
                 {
-                    video = await client.GetVideoAsync(id);
+                    video = await client.Videos.GetAsync(url);
                     break;
                 }
                 catch { }
@@ -51,7 +50,7 @@ namespace ClubSiivaWPF
                     Priority = 0,
                     RequesterId = 0,
                     RequesterUsername = "Manual Request",
-                    YoutubeId = id,
+                    YoutubeId = url,
                     Title = video.Title,
                     Description = await SongRequest.GetDescriptionAsync(video.Title),
                     File = tempfile,
@@ -82,11 +81,13 @@ namespace ClubSiivaWPF
                     UseShellExecute = false,
                     FileName = "youtube-dl.exe",
                     WindowStyle = ProcessWindowStyle.Hidden,
-                    Arguments = "-f mp4 https://www.youtube.com/watch?v=" + song.YoutubeId + " -o " + "\"" + song.File + "\""
+                    RedirectStandardOutput = true,
+                    Arguments = "-f mp4 " + song.YoutubeId + " -o " + "\"" + song.File + "\""
                 };
 
                 try
                 {
+                    Console.WriteLine(startInfo.Arguments);
                     // Start the process with the info we specified.
                     // Call WaitForExit and then the using statement will close.
                     using (Process exeProcess = Process.Start(startInfo))
@@ -122,9 +123,9 @@ namespace ClubSiivaWPF
             await form.CurrentURL.Dispatcher.BeginInvoke((Action)(() => form.CurrentURL.Text = "https://www.youtube.com/watch?v=" + song.YoutubeId));
             // Find the discord channel to tell were now playing
             ulong chan = 0;
-            foreach(var channel in client.GetGuild(Convert.ToUInt64(conf.Guild)).Channels)
+            foreach (var channel in client.GetGuild(Convert.ToUInt64(conf.Guild)).Channels)
             {
-                if(channel.Name.ToLower() == conf.MessageChannel.ToLower())
+                if (channel.Name.ToLower() == conf.MessageChannel.ToLower())
                 {
                     chan = channel.Id;
                     break;
@@ -196,7 +197,7 @@ namespace ClubSiivaWPF
             // Play the song
             if (temp.Title != null)
             {
-                Task.Run(() => TriggerqueueAsync(temp, form, hidb, db,discordclient, conf));
+                Task.Run(() => TriggerqueueAsync(temp, form, hidb, db, discordclient, conf));
             }
         }
         /// <summary>
@@ -250,7 +251,7 @@ namespace ClubSiivaWPF
                                 startInfo.UseShellExecute = false;
                                 startInfo.FileName = "youtube-dl.exe";
                                 startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                                startInfo.Arguments = "-f mp4 https://www.youtube.com/watch?v=" + songs[i].YoutubeId + " -o " + "\"" + songs[i].File + "\"";
+                                startInfo.Arguments = "-f mp4 " + songs[i].YoutubeId + " -o " + "\"" + songs[i].File + "\"";
 
                                 try
                                 {
@@ -283,13 +284,13 @@ namespace ClubSiivaWPF
             var historydb = hidb.GetCollection<History>("History");
             var results = historydb.FindAll();
             var client = new YoutubeClient();
-            YoutubeExplode.Models.Video video = null;
+            YoutubeExplode.Videos.Video video = null;
             // Attempt to get the video info of the last one
             for (int attempts = 0; attempts < 3; attempts++)
             {
                 try
                 {
-                    video = await client.GetVideoAsync(results.Last().YoutubeId);
+                    video = await client.Videos.GetAsync(results.Last().YoutubeId);
                     break;
                 }
                 catch { }

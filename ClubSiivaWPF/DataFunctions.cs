@@ -25,7 +25,7 @@ namespace ClubSiivaWPF
                 {
                     // Check if the owner of the guild is the one messaging
                     var GuildOwner = chnl.Guild.OwnerId;
-                    if(user.Author.Id == GuildOwner)
+                    if (user.Author.Id == GuildOwner)
                     {
                         return true;
                     }
@@ -33,7 +33,7 @@ namespace ClubSiivaWPF
                     foreach (SocketRole rolesfound in ((SocketGuildUser)user.Author).Roles)
                     {
                         // Check against the config roles
-                        foreach(var modrole in roles)
+                        foreach (var modrole in roles)
                         {
                             if (rolesfound.Name.ToLower().Contains(modrole.ToLower()))
                             {
@@ -107,7 +107,7 @@ namespace ClubSiivaWPF
             // Parse it in case we dont already have it as an ID
             try
             {
-                id = YoutubeClient.ParseVideoId(song);
+                id = song;
             }
             catch
             {

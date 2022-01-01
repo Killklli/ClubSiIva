@@ -24,7 +24,7 @@ namespace ClubSiivaWPF
         /// <param name="usrdb">The liteDB for the users</param>
         /// <param name="roles">The list of roles from the config</param>
         /// <returns></returns>
-        public static async System.Threading.Tasks.Task CommandsAsync(DiscordSocketClient discordclient, SocketMessage message, LiteDatabase hidb, LiteDatabase db, LiteDatabase usrdb,LiteDatabase favdb, List<string> roles, Config conf)
+        public static async System.Threading.Tasks.Task CommandsAsync(DiscordSocketClient discordclient, SocketMessage message, LiteDatabase hidb, LiteDatabase db, LiteDatabase usrdb, LiteDatabase favdb, List<string> roles, Config conf)
         {
             // Get the first word in the message content
             string command = message.Content.ToLower().Split().ToList()[0];
@@ -144,7 +144,7 @@ namespace ClubSiivaWPF
                 if (DataFunctions.IsMod(message, roles) == true && message.Content.ToLower().Split().ToList().Count == 2)
                 {
                     // Get the ID of the song we want to ban
-                    var id = YoutubeClient.ParseVideoId(message.Content.Split().ToList()[1]);
+                    var id = message.Content.Split().ToList()[1];
                     // Search for the song in the history 
                     var historydb = hidb.GetCollection<History>("History");
                     var results = historydb.Find(x => x.YoutubeId == id && x.BadSong == true);
@@ -293,7 +293,7 @@ namespace ClubSiivaWPF
                 if (DataFunctions.IsMod(message, roles) == true && message.Content.ToLower().Split().ToList().Count == 2)
                 {
                     // Get the song ID and check if its in the queue
-                    var id = YoutubeClient.ParseVideoId(message.Content.Split().ToList()[1]);
+                    var id = message.Content.Split().ToList()[1];
                     var queuedb = db.GetCollection<Song>("Queue");
                     var results = queuedb.Find(x => x.YoutubeId == id);
                     // If we found the song set the priority to the highest we can
@@ -316,7 +316,7 @@ namespace ClubSiivaWPF
                 else if (DataFunctions.IsMod(message, roles) == true && message.Content.ToLower().Split().ToList().Count == 3)
                 {
                     // Get the song ID and check if its in the queue
-                    var id = YoutubeClient.ParseVideoId(message.Content.Split().ToList()[1]);
+                    var id = message.Content.Split().ToList()[1];
                     var queuedb = db.GetCollection<Song>("Queue");
                     var results = queuedb.Find(x => x.YoutubeId == id);
                     // If we found the song set the priority to the highest we can
@@ -370,7 +370,7 @@ namespace ClubSiivaWPF
                 if (DataFunctions.IsMod(message, roles) == true && message.Content.ToLower().Split().ToList().Count == 2)
                 {
                     // Check if the song is in the queue
-                    var id = YoutubeClient.ParseVideoId(message.Content.Split().ToList()[1]);
+                    var id = message.Content.Split().ToList()[1];
                     var queuedb = db.GetCollection<Song>("Queue");
                     var results = queuedb.Find(x => x.YoutubeId == id);
                     // Approve the song in the DB
@@ -410,15 +410,15 @@ namespace ClubSiivaWPF
                 if (DataFunctions.IsMod(message, roles) == true && message.Content.ToLower().Split().ToList().Count == 2)
                 {
                     // Parse the video information
-                    var id = YoutubeClient.ParseVideoId(message.Content.Split().ToList()[1]);
-                    YoutubeExplode.Models.Video video = null;
+                    var id = message.Content.Split().ToList()[1];
+                    YoutubeExplode.Videos.Video video = null;
                     var client = new YoutubeClient();
                     // Attempt to get the video with a retry limit of 3 times
                     for (int attempts = 0; attempts < 3; attempts++)
                     {
                         try
                         {
-                            video = await client.GetVideoAsync(id);
+                            video = await client.Videos.GetAsync(id);
                             break;
                         }
                         catch { }
@@ -546,7 +546,7 @@ namespace ClubSiivaWPF
                     if (counter < 50)
                     {
                         // Add it to the string list
-                        mess = mess + YoutubeClient.ParseVideoId(song.YoutubeId) + ",";
+                        mess = mess + message.Content.Split().ToList()[1] + ",";
                         counter++;
                     }
                     else
