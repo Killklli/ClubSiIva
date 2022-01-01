@@ -120,7 +120,7 @@ namespace ClubSiivaWPF
             System.IO.File.WriteAllText(Directory.GetCurrentDirectory() + "/textfiles/Title.txt", song.Title);
             await form.ProgressSlider.Dispatcher.BeginInvoke((Action)(() => form.ProgressSlider.Maximum = TimeSpan.Parse(song.Duration).TotalSeconds));
             await form.Favorite.Dispatcher.BeginInvoke((Action)(() => form.Favorite.Content = "☆"));
-            await form.CurrentURL.Dispatcher.BeginInvoke((Action)(() => form.CurrentURL.Text = "https://www.youtube.com/watch?v=" + song.YoutubeId));
+            await form.CurrentURL.Dispatcher.BeginInvoke((Action)(() => form.CurrentURL.Text = song.YoutubeId));
             // Find the discord channel to tell were now playing
             ulong chan = 0;
             foreach (var channel in client.GetGuild(Convert.ToUInt64(conf.Guild)).Channels)
